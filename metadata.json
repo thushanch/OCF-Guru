@@ -1,0 +1,5 @@
+{
+  "name": "OCF Guru",
+  "description": "A professional hydraulic calculator for Open Channel Flow analysis, supporting multiple channel geometries and real-time cross-section visualization.",
+  "requestFramePermissions": []
+}
