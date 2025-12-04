@@ -115,7 +115,7 @@ export const getGeometry = (type: ChannelType, y: number, p: InputParams): Geome
 
 // --- Solvers ---
 
-const solveNormalDepth = (type: ChannelType, p: InputParams, unit: UnitSystem): number => {
+export const solveNormalDepth = (type: ChannelType, p: InputParams, unit: UnitSystem): number => {
   const { K } = UNIT_CONSTANTS[unit];
   const target = (p.flowRate * p.manningN) / (K * Math.sqrt(p.slope));
   

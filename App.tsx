@@ -14,11 +14,13 @@ import {
   Zap,
   ArrowRightLeft,
   BookOpen,
-  User
+  User,
+  LineChart
 } from 'lucide-react';
 import { ChannelType, InputParams, CalculationResult, DEFAULT_PARAMS, UnitSystem, SectionProperties } from './types';
-import { calculateFlow, calculateSectionProperties } from './utils/calculations';
+import { calculateFlow, calculateSectionProperties, solveNormalDepth } from './utils/calculations';
 import ChannelVisualizer from './components/ChannelVisualizer';
+import TimeSeriesChart from './components/TimeSeriesChart';
 
 const ChannelIcons = {
   [ChannelType.Rectangular]: Square,
@@ -28,7 +30,7 @@ const ChannelIcons = {
 };
 
 type AnalysisMode = 'Normal' | 'Critical' | 'Custom';
-type AppView = 'Calculator' | 'Theory' | 'Settings' | 'About';
+type AppView = 'Calculator' | 'Hydrograph' | 'Theory' | 'Settings' | 'About';
 type ViewMode = 'Simple' | 'Advanced';
 
 const App: React.FC = () => {
@@ -46,6 +48,10 @@ const App: React.FC = () => {
   const [analysisMode, setAnalysisMode] = useState<AnalysisMode>('Normal');
   const [customDepth, setCustomDepth] = useState<number>(1.0);
   const [sectionProps, setSectionProps] = useState<SectionProperties | null>(null);
+
+  // Hydrograph State
+  const [hydroInput, setHydroInput] = useState<string>("0, 10\n1, 15\n2, 25\n3, 20\n4, 12\n5, 10");
+  const [hydroData, setHydroData] = useState<{time: number, value: number}[]>([]);
 
   // Unit Conversion Logic
   const toggleUnit = () => {
@@ -97,6 +103,28 @@ const App: React.FC = () => {
       [field]: isNaN(numVal) ? 0 : numVal
     }));
   };
+
+  // Process Hydrograph Data
+  useEffect(() => {
+    const lines = hydroInput.trim().split('\n');
+    const data: {time: number, value: number}[] = [];
+    
+    lines.forEach(line => {
+        const parts = line.split(/[,\t\s]+/);
+        if (parts.length >= 2) {
+            const t = parseFloat(parts[0]);
+            const q = parseFloat(parts[1]);
+            if (!isNaN(t) && !isNaN(q)) {
+                // Calculate Normal Depth for this Q
+                // Create a temp params object with new Q
+                const tempParams = { ...params, flowRate: q };
+                const y = solveNormalDepth(activeTab, tempParams, unit);
+                data.push({ time: t, value: y });
+            }
+        }
+    });
+    setHydroData(data);
+  }, [hydroInput, params, activeTab, unit]);
 
   // Effects
   useEffect(() => {
@@ -424,6 +452,69 @@ const App: React.FC = () => {
     </div>
   );
 
+  const HydrographView = () => (
+    <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 h-full">
+        <div className="xl:col-span-4 space-y-6">
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+                    <h2 className="font-semibold text-slate-800 flex items-center gap-2">
+                        <LineChart className="w-4 h-4 text-slate-400" />
+                        Time Series Input
+                    </h2>
+                </div>
+                <div className="p-6 space-y-4">
+                    <p className="text-sm text-slate-600">
+                        Enter data as <code>Time, Flow(Q)</code>. The app will calculate the Water Level (y) for each time step using the current geometry settings from the Calculator tab.
+                    </p>
+                    <textarea 
+                        className="w-full h-64 p-3 bg-white border border-slate-300 rounded-md font-mono text-sm text-slate-800 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+                        placeholder={`0, 10\n1, 15\n...`}
+                        value={hydroInput}
+                        onChange={(e) => setHydroInput(e.target.value)}
+                    />
+                    <div className="text-xs text-slate-400">
+                        Format: Time (hr/min), Flow Rate ({U.Q})
+                    </div>
+                </div>
+            </div>
+            
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                 <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+                    <h2 className="font-semibold text-slate-800 text-sm">
+                        Current Channel Settings
+                    </h2>
+                </div>
+                <div className="p-4 text-sm text-slate-600 space-y-2">
+                    <div className="flex justify-between"><span>Type:</span> <span className="font-medium text-slate-800">{activeTab}</span></div>
+                    <div className="flex justify-between"><span>Slope:</span> <span className="font-medium text-slate-800">{params.slope}</span></div>
+                    <div className="flex justify-between"><span>Manning n:</span> <span className="font-medium text-slate-800">{params.manningN}</span></div>
+                    {activeTab === 'Rectangular' && <div className="flex justify-between"><span>Width:</span> <span className="font-medium text-slate-800">{params.width} {U.L}</span></div>}
+                    {activeTab === 'Circular' && <div className="flex justify-between"><span>Diameter:</span> <span className="font-medium text-slate-800">{params.diameter} {U.L}</span></div>}
+                </div>
+            </div>
+        </div>
+
+        <div className="xl:col-span-8 space-y-6">
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden h-[500px] flex flex-col">
+                <div className="px-6 py-4 border-b border-slate-100 bg-white flex justify-between items-center">
+                    <h2 className="font-semibold text-slate-800 flex items-center gap-2">
+                        <Waves className="w-4 h-4 text-brand-500" />
+                        Time vs Water Level
+                    </h2>
+                </div>
+                <div className="flex-1 bg-slate-50 p-4">
+                     <TimeSeriesChart 
+                        data={hydroData} 
+                        xLabel="Time" 
+                        yLabel={`Water Level y (${U.L})`} 
+                        color="#0ea5e9"
+                     />
+                </div>
+            </div>
+        </div>
+    </div>
+  );
+
   const TheoryView = () => (
     <div className="max-w-4xl mx-auto bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
       <div className="px-8 py-6 border-b border-slate-100 bg-slate-50/50">
@@ -585,6 +676,14 @@ const App: React.FC = () => {
               Calculator
             </button>
             <button 
+               onClick={() => setCurrentView('Hydrograph')}
+               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all
+                ${currentView === 'Hydrograph' ? 'bg-slate-100 text-slate-900' : 'text-slate-600 hover:bg-slate-50'}`}
+            >
+              <LineChart className="w-4 h-4" />
+              Hydrograph
+            </button>
+            <button 
                onClick={() => setCurrentView('Theory')}
                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all
                 ${currentView === 'Theory' ? 'bg-slate-100 text-slate-900' : 'text-slate-600 hover:bg-slate-50'}`}
@@ -669,6 +768,7 @@ const App: React.FC = () => {
 
           {/* Dynamic Content */}
           {currentView === 'Calculator' && <CalculatorView />}
+          {currentView === 'Hydrograph' && <HydrographView />}
           {currentView === 'Theory' && <TheoryView />}
           {currentView === 'Settings' && <SettingsView />}
           {currentView === 'About' && <AboutView />}
