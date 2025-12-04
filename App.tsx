@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { 
   Calculator, 
@@ -15,12 +16,19 @@ import {
   ArrowRightLeft,
   BookOpen,
   User,
-  LineChart
+  LineChart,
+  Map,
+  ArrowRight,
+  Plus,
+  Trash2,
+  ChevronDown,
+  ChevronRight
 } from 'lucide-react';
-import { ChannelType, InputParams, CalculationResult, DEFAULT_PARAMS, UnitSystem, SectionProperties } from './types';
-import { calculateFlow, calculateSectionProperties, solveNormalDepth } from './utils/calculations';
+import { ChannelType, InputParams, CalculationResult, DEFAULT_PARAMS, UnitSystem, SectionProperties, ProfilePoint, BoundaryCondition, CanalSectionInput } from './types';
+import { calculateFlow, calculateSectionProperties, solveNormalDepth, calculateMultiReachProfile } from './utils/calculations';
 import ChannelVisualizer from './components/ChannelVisualizer';
 import TimeSeriesChart from './components/TimeSeriesChart';
+import ProfileChart from './components/ProfileChart';
 
 const ChannelIcons = {
   [ChannelType.Rectangular]: Square,
@@ -30,7 +38,7 @@ const ChannelIcons = {
 };
 
 type AnalysisMode = 'Normal' | 'Critical' | 'Custom';
-type AppView = 'Calculator' | 'Hydrograph' | 'Theory' | 'Settings' | 'About';
+type AppView = 'Calculator' | 'Hydrograph' | 'CanalModel' | 'Theory' | 'Settings' | 'About';
 type ViewMode = 'Simple' | 'Advanced';
 
 const App: React.FC = () => {
@@ -53,28 +61,52 @@ const App: React.FC = () => {
   const [hydroInput, setHydroInput] = useState<string>("0, 10\n1, 15\n2, 25\n3, 20\n4, 12\n5, 10");
   const [hydroData, setHydroData] = useState<{time: number, value: number}[]>([]);
 
+  // Canal Model State (Multi-Reach)
+  const [canalSections, setCanalSections] = useState<CanalSectionInput[]>([
+      { id: '1', inputMode: 'Slope', length: 1000, slope: 0.001, usElevation: 10, dsElevation: 9 }
+  ]);
+  const [boundaryCond, setBoundaryCond] = useState<BoundaryCondition>({
+    location: 'Downstream',
+    type: 'KnownDepth',
+    value: 2.0
+  });
+  const [profileData, setProfileData] = useState<ProfilePoint[]>([]);
+
   // Unit Conversion Logic
   const toggleUnit = () => {
     setUnit(prev => {
       const newUnit = prev === 'SI' ? 'Imperial' : 'SI';
-      
+      const factor = 3.28084;
+      const qFactor = 35.3147;
+
       // Convert Params
       const newParams = { ...params };
       if (newUnit === 'Imperial') {
-        // SI -> Imperial
-        newParams.flowRate = newParams.flowRate * 35.3147;
-        newParams.width = newParams.width * 3.28084;
-        newParams.diameter = newParams.diameter * 3.28084;
+        newParams.flowRate *= qFactor;
+        newParams.width *= factor;
+        newParams.diameter *= factor;
       } else {
-        // Imperial -> SI
-        newParams.flowRate = newParams.flowRate / 35.3147;
-        newParams.width = newParams.width / 3.28084;
-        newParams.diameter = newParams.diameter / 3.28084;
+        newParams.flowRate /= qFactor;
+        newParams.width /= factor;
+        newParams.diameter /= factor;
       }
       setParams(newParams);
       
       // Convert Custom Depth
-      setCustomDepth(d => newUnit === 'Imperial' ? d * 3.28084 : d / 3.28084);
+      setCustomDepth(d => newUnit === 'Imperial' ? d * factor : d / factor);
+
+      // Convert Canal Sections
+      setCanalSections(sections => sections.map(s => ({
+          ...s,
+          length: newUnit === 'Imperial' ? s.length * factor : s.length / factor,
+          usElevation: newUnit === 'Imperial' ? s.usElevation * factor : s.usElevation / factor,
+          dsElevation: newUnit === 'Imperial' ? s.dsElevation * factor : s.dsElevation / factor,
+      })));
+
+      setBoundaryCond(prev => ({
+          ...prev,
+          value: newUnit === 'Imperial' ? prev.value * factor : prev.value / factor
+      }));
 
       return newUnit;
     });
@@ -115,8 +147,6 @@ const App: React.FC = () => {
             const t = parseFloat(parts[0]);
             const q = parseFloat(parts[1]);
             if (!isNaN(t) && !isNaN(q)) {
-                // Calculate Normal Depth for this Q
-                // Create a temp params object with new Q
                 const tempParams = { ...params, flowRate: q };
                 const y = solveNormalDepth(activeTab, tempParams, unit);
                 data.push({ time: t, value: y });
@@ -134,18 +164,55 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (!result) return;
-
     let depth = 0;
     if (analysisMode === 'Normal') depth = result.normalDepth;
     else if (analysisMode === 'Critical') depth = result.criticalDepth;
     else depth = customDepth;
-
     if (isNaN(depth)) depth = 0;
-
     const props = calculateSectionProperties(activeTab, depth, params, unit);
     setSectionProps(props);
-
   }, [activeTab, params, unit, analysisMode, customDepth, result]);
+
+  // Handle Canal Model Run
+  const handleRunCanalModel = () => {
+    let val = boundaryCond.value;
+    if (result) {
+        if (boundaryCond.type === 'NormalDepth') val = result.normalDepth;
+        if (boundaryCond.type === 'CriticalDepth') val = result.criticalDepth;
+    }
+    const finalBC = { ...boundaryCond, value: val };
+    const points = calculateMultiReachProfile(activeTab, params, canalSections, finalBC, unit);
+    setProfileData(points);
+  };
+
+  const addCanalSection = () => {
+      if (canalSections.length >= 5) return;
+      const last = canalSections[canalSections.length - 1];
+      const newId = (parseInt(last.id) + 1).toString();
+      
+      // Default to continuous
+      const newSec: CanalSectionInput = {
+          id: newId,
+          inputMode: last.inputMode,
+          length: last.length,
+          slope: last.slope,
+          usElevation: last.dsElevation, // Connect
+          dsElevation: last.dsElevation - (last.slope * last.length)
+      };
+      setCanalSections([...canalSections, newSec]);
+  };
+
+  const removeCanalSection = (id: string) => {
+      if (canalSections.length <= 1) return;
+      setCanalSections(canalSections.filter(s => s.id !== id));
+  };
+
+  const updateSection = (id: string, field: keyof CanalSectionInput, value: any) => {
+      setCanalSections(sections => sections.map(s => 
+          s.id === id ? { ...s, [field]: value } : s
+      ));
+  };
+
 
   // Labels
   const U = {
@@ -161,7 +228,6 @@ const App: React.FC = () => {
 
   const CalculatorView = () => (
     <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
-      {/* INPUTS */}
       <div className="xl:col-span-4 space-y-6">
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
           <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
@@ -170,7 +236,6 @@ const App: React.FC = () => {
               Parameters ({unit})
             </h2>
           </div>
-          
           <div className="p-6 space-y-5">
             <div className="space-y-4">
               <label className="block">
@@ -251,7 +316,6 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        {/* Section Analysis Controls - ADVANCED ONLY */}
         {viewMode === 'Advanced' && (
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
@@ -302,10 +366,7 @@ const App: React.FC = () => {
         )}
       </div>
 
-      {/* RESULTS */}
       <div className="xl:col-span-8 space-y-6">
-        
-        {/* VISUALIZER */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-1 overflow-hidden h-[420px] flex flex-col">
           <div className="px-5 py-3 flex items-center justify-between bg-white border-b border-slate-100">
             <h2 className="font-semibold text-slate-800 flex items-center gap-2">
@@ -333,10 +394,8 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        {/* KEY RESULTS CARDS */}
         {result && !result.error ? (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            
             <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 relative overflow-hidden group md:col-span-1">
               <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
                 <Activity className="w-16 h-16 text-brand-600" />
@@ -372,7 +431,6 @@ const App: React.FC = () => {
                   </div>
               </div>
             </div>
-
           </div>
         ) : (
           <div className="bg-rose-50 border border-rose-200 rounded-xl p-6 text-center text-rose-800">
@@ -381,11 +439,8 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {/* DETAILED PROPERTIES - Hidden in Simple Mode */}
         {sectionProps && viewMode === 'Advanced' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            
-            {/* Geometric Props */}
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                 <div className="px-5 py-3 bg-slate-50/50 border-b border-slate-100">
                   <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
@@ -413,7 +468,6 @@ const App: React.FC = () => {
                 </div>
             </div>
 
-            {/* Energy & Momentum */}
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                 <div className="px-5 py-3 bg-slate-50/50 border-b border-slate-100">
                   <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
@@ -445,7 +499,6 @@ const App: React.FC = () => {
                   </div>
                 </div>
             </div>
-
           </div>
         )}
       </div>
@@ -454,65 +507,255 @@ const App: React.FC = () => {
 
   const HydrographView = () => (
     <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 h-full">
-        <div className="xl:col-span-4 space-y-6">
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
-                    <h2 className="font-semibold text-slate-800 flex items-center gap-2">
-                        <LineChart className="w-4 h-4 text-slate-400" />
-                        Time Series Input
-                    </h2>
-                </div>
-                <div className="p-6 space-y-4">
-                    <p className="text-sm text-slate-600">
-                        Enter data as <code>Time, Flow(Q)</code>. The app will calculate the Water Level (y) for each time step using the current geometry settings from the Calculator tab.
-                    </p>
-                    <textarea 
-                        className="w-full h-64 p-3 bg-white border border-slate-300 rounded-md font-mono text-sm text-slate-800 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-                        placeholder={`0, 10\n1, 15\n...`}
-                        value={hydroInput}
-                        onChange={(e) => setHydroInput(e.target.value)}
-                    />
-                    <div className="text-xs text-slate-400">
-                        Format: Time (hr/min), Flow Rate ({U.Q})
-                    </div>
-                </div>
-            </div>
-            
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                 <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
-                    <h2 className="font-semibold text-slate-800 text-sm">
-                        Current Channel Settings
-                    </h2>
-                </div>
-                <div className="p-4 text-sm text-slate-600 space-y-2">
-                    <div className="flex justify-between"><span>Type:</span> <span className="font-medium text-slate-800">{activeTab}</span></div>
-                    <div className="flex justify-between"><span>Slope:</span> <span className="font-medium text-slate-800">{params.slope}</span></div>
-                    <div className="flex justify-between"><span>Manning n:</span> <span className="font-medium text-slate-800">{params.manningN}</span></div>
-                    {activeTab === 'Rectangular' && <div className="flex justify-between"><span>Width:</span> <span className="font-medium text-slate-800">{params.width} {U.L}</span></div>}
-                    {activeTab === 'Circular' && <div className="flex justify-between"><span>Diameter:</span> <span className="font-medium text-slate-800">{params.diameter} {U.L}</span></div>}
-                </div>
-            </div>
+      <div className="xl:col-span-4 space-y-6">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+            <h2 className="font-semibold text-slate-800 flex items-center gap-2">
+              <LineChart className="w-4 h-4 text-slate-400" />
+              Input Hydrograph
+            </h2>
+          </div>
+          <div className="p-6 space-y-4">
+             <div className="space-y-2">
+                <label className="block text-sm font-medium text-slate-700">
+                   Time vs Flow Series
+                </label>
+                <p className="text-xs text-slate-500">
+                   Enter data points as "Time, Flow". <br/>
+                   Time in hours/sec (arbitrary), Flow in {U.Q}.
+                </p>
+                <textarea 
+                   value={hydroInput}
+                   onChange={(e) => setHydroInput(e.target.value)}
+                   rows={10}
+                   className="w-full font-mono text-sm p-3 border border-slate-300 rounded-md focus:ring-brand-500 focus:border-brand-500"
+                   placeholder="0, 10&#10;1, 15&#10;2, 25"
+                />
+             </div>
+             <div className="bg-slate-50 p-3 rounded text-xs text-slate-600 border border-slate-200">
+                <p>The system will calculate the corresponding <strong>Normal Depth</strong> for each flow rate based on the channel parameters set in the Calculator tab.</p>
+             </div>
+          </div>
         </div>
+      </div>
 
-        <div className="xl:col-span-8 space-y-6">
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden h-[500px] flex flex-col">
-                <div className="px-6 py-4 border-b border-slate-100 bg-white flex justify-between items-center">
-                    <h2 className="font-semibold text-slate-800 flex items-center gap-2">
-                        <Waves className="w-4 h-4 text-brand-500" />
-                        Time vs Water Level
-                    </h2>
-                </div>
-                <div className="flex-1 bg-slate-50 p-4">
+      <div className="xl:col-span-8 space-y-6">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden h-[500px] flex flex-col">
+            <div className="px-6 py-4 border-b border-slate-100 bg-white flex justify-between items-center">
+                <h2 className="font-semibold text-slate-800 flex items-center gap-2">
+                    <Activity className="w-4 h-4 text-brand-500" />
+                    Depth Hydrograph (Stage vs Time)
+                </h2>
+            </div>
+            <div className="flex-1 bg-slate-50 p-4">
+                 {hydroData.length > 0 ? (
                      <TimeSeriesChart 
                         data={hydroData} 
                         xLabel="Time" 
-                        yLabel={`Water Level y (${U.L})`} 
+                        yLabel={`Normal Depth (${U.L})`} 
                         color="#0ea5e9"
                      />
-                </div>
+                 ) : (
+                     <div className="w-full h-full flex flex-col items-center justify-center text-slate-400">
+                         <LineChart className="w-12 h-12 mb-2 opacity-20" />
+                         <p className="text-sm">Enter data points to visualize depth hydrograph.</p>
+                     </div>
+                 )}
             </div>
         </div>
+      </div>
     </div>
+  );
+
+  const CanalModelView = () => (
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 h-full">
+         <div className="xl:col-span-4 space-y-6">
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col max-h-[800px]">
+                <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+                    <h2 className="font-semibold text-slate-800 flex items-center gap-2">
+                        <Map className="w-4 h-4 text-slate-400" />
+                        Model Configuration
+                    </h2>
+                </div>
+                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                   
+                   <div className="p-3 bg-slate-50 border border-slate-100 rounded-md text-xs text-slate-500 space-y-1">
+                       <p className="font-semibold text-slate-700">Calculated Geometry:</p>
+                       <div className="flex justify-between"><span>Type:</span> <span>{activeTab}</span></div>
+                       <div className="flex justify-between"><span>Q:</span> <span>{params.flowRate} {U.Q}</span></div>
+                   </div>
+
+                   {/* Sections List */}
+                   <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                         <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Reach Sections ({canalSections.length}/5)</h3>
+                         <button onClick={addCanalSection} disabled={canalSections.length >= 5} className="text-brand-600 hover:text-brand-700 disabled:opacity-50">
+                            <Plus className="w-4 h-4" />
+                         </button>
+                      </div>
+                      
+                      {canalSections.map((sec, idx) => (
+                         <div key={sec.id} className="border border-slate-200 rounded-lg p-3 space-y-3 bg-white">
+                             <div className="flex items-center justify-between">
+                                <span className="text-sm font-medium text-slate-700">Section {idx + 1}</span>
+                                {idx > 0 && <button onClick={() => removeCanalSection(sec.id)}><Trash2 className="w-3 h-3 text-slate-400 hover:text-rose-500" /></button>}
+                             </div>
+                             
+                             <div className="flex rounded shadow-sm">
+                                <button 
+                                   onClick={() => updateSection(sec.id, 'inputMode', 'Slope')}
+                                   className={`flex-1 text-[10px] py-1 border rounded-l ${sec.inputMode === 'Slope' ? 'bg-brand-50 text-brand-700 border-brand-200' : 'bg-white text-slate-500 border-slate-200'}`}
+                                >
+                                   Slope/Len
+                                </button>
+                                <button 
+                                   onClick={() => updateSection(sec.id, 'inputMode', 'Elevation')}
+                                   className={`flex-1 text-[10px] py-1 border-t border-b border-r rounded-r ${sec.inputMode === 'Elevation' ? 'bg-brand-50 text-brand-700 border-brand-200' : 'bg-white text-slate-500 border-slate-200'}`}
+                                >
+                                   Elevations
+                                </button>
+                             </div>
+
+                             <div className="grid grid-cols-2 gap-2">
+                                <label className="block">
+                                   <span className="text-[10px] text-slate-500 block">Length ({U.L})</span>
+                                   <input 
+                                      type="number" value={sec.length} 
+                                      onChange={(e) => updateSection(sec.id, 'length', parseFloat(e.target.value))}
+                                      className="w-full text-sm p-1 border border-slate-300 rounded" 
+                                   />
+                                </label>
+                                {sec.inputMode === 'Slope' ? (
+                                   <label className="block">
+                                      <span className="text-[10px] text-slate-500 block">Slope</span>
+                                      <input 
+                                         type="number" step="0.0001" value={sec.slope} 
+                                         onChange={(e) => updateSection(sec.id, 'slope', parseFloat(e.target.value))}
+                                         className="w-full text-sm p-1 border border-slate-300 rounded" 
+                                      />
+                                   </label>
+                                ) : (
+                                    <div className="col-span-2 grid grid-cols-2 gap-2">
+                                        <label className="block">
+                                            <span className="text-[10px] text-slate-500 block">US Elev ({U.L})</span>
+                                            <input 
+                                                type="number" value={sec.usElevation} 
+                                                onChange={(e) => updateSection(sec.id, 'usElevation', parseFloat(e.target.value))}
+                                                className="w-full text-sm p-1 border border-slate-300 rounded" 
+                                            />
+                                        </label>
+                                        <label className="block">
+                                            <span className="text-[10px] text-slate-500 block">DS Elev ({U.L})</span>
+                                            <input 
+                                                type="number" value={sec.dsElevation} 
+                                                onChange={(e) => updateSection(sec.id, 'dsElevation', parseFloat(e.target.value))}
+                                                className="w-full text-sm p-1 border border-slate-300 rounded" 
+                                            />
+                                        </label>
+                                    </div>
+                                )}
+                             </div>
+                         </div>
+                      ))}
+                   </div>
+                   
+                   <div className="space-y-3 pt-4 border-t border-slate-100">
+                        <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Boundary Conditions</h3>
+                        
+                        <div className="grid grid-cols-2 gap-2">
+                            <button 
+                                onClick={() => setBoundaryCond(prev => ({ ...prev, location: 'Upstream' }))}
+                                className={`px-3 py-2 text-xs font-medium rounded border text-center ${boundaryCond.location === 'Upstream' ? 'bg-brand-50 text-brand-700 border-brand-200' : 'bg-white text-slate-600 border-slate-200'}`}
+                            >
+                                Upstream End
+                            </button>
+                            <button 
+                                onClick={() => setBoundaryCond(prev => ({ ...prev, location: 'Downstream' }))}
+                                className={`px-3 py-2 text-xs font-medium rounded border text-center ${boundaryCond.location === 'Downstream' ? 'bg-brand-50 text-brand-700 border-brand-200' : 'bg-white text-slate-600 border-slate-200'}`}
+                            >
+                                Downstream End
+                            </button>
+                        </div>
+
+                        <div className="space-y-2 mt-2">
+                             <label className="flex items-center gap-2 text-sm text-slate-700">
+                                 <input 
+                                    type="radio" 
+                                    name="bcType" 
+                                    checked={boundaryCond.type === 'KnownDepth'} 
+                                    onChange={() => setBoundaryCond(prev => ({ ...prev, type: 'KnownDepth' }))}
+                                 />
+                                 Known Depth y
+                             </label>
+                             {boundaryCond.type === 'KnownDepth' && (
+                                 <input 
+                                    type="number"
+                                    step="0.01"
+                                    value={boundaryCond.value}
+                                    onChange={(e) => setBoundaryCond(prev => ({ ...prev, value: parseFloat(e.target.value) || 0 }))} 
+                                    className="w-full ml-6 max-w-[120px] p-1 text-sm border border-slate-300 rounded"
+                                 />
+                             )}
+                             
+                             <label className="flex items-center gap-2 text-sm text-slate-700">
+                                 <input 
+                                    type="radio" 
+                                    name="bcType" 
+                                    checked={boundaryCond.type === 'NormalDepth'} 
+                                    onChange={() => setBoundaryCond(prev => ({ ...prev, type: 'NormalDepth' }))}
+                                 />
+                                 Normal Depth
+                             </label>
+
+                             <label className="flex items-center gap-2 text-sm text-slate-700">
+                                 <input 
+                                    type="radio" 
+                                    name="bcType" 
+                                    checked={boundaryCond.type === 'CriticalDepth'} 
+                                    onChange={() => setBoundaryCond(prev => ({ ...prev, type: 'CriticalDepth' }))}
+                                 />
+                                 Critical Depth
+                             </label>
+                        </div>
+                   </div>
+
+                   <button 
+                      onClick={handleRunCanalModel}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-brand-600 hover:bg-brand-700 text-white font-medium rounded-lg shadow-sm transition-colors"
+                   >
+                      <ArrowRight className="w-4 h-4" />
+                      Run Model
+                   </button>
+                </div>
+            </div>
+         </div>
+
+         <div className="xl:col-span-8 space-y-6">
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden h-[500px] flex flex-col">
+                <div className="px-6 py-4 border-b border-slate-100 bg-white flex justify-between items-center">
+                    <h2 className="font-semibold text-slate-800 flex items-center gap-2">
+                        <Activity className="w-4 h-4 text-brand-500" />
+                        Water Surface Profile
+                    </h2>
+                    {profileData.length > 0 && (
+                        <span className="text-xs text-slate-500 font-mono bg-slate-100 px-2 py-1 rounded">
+                            {profileData.length} pts
+                        </span>
+                    )}
+                </div>
+                <div className="flex-1 bg-slate-50 p-4">
+                     {profileData.length > 0 ? (
+                         <ProfileChart data={profileData} unitLabel={U.L} />
+                     ) : (
+                         <div className="w-full h-full flex flex-col items-center justify-center text-slate-400">
+                             <Map className="w-12 h-12 mb-2 opacity-20" />
+                             <p className="text-sm">Configure reaches and click 'Run Model' to visualize.</p>
+                         </div>
+                     )}
+                </div>
+            </div>
+         </div>
+      </div>
   );
 
   const TheoryView = () => (
@@ -543,27 +786,27 @@ const App: React.FC = () => {
         </section>
 
         <section>
+          <h3 className="text-lg font-semibold text-slate-900 mb-3 border-b border-slate-100 pb-2">Gradually Varied Flow (GVF)</h3>
+          <p className="text-slate-600 mb-4 leading-relaxed">
+             GVF describes steady non-uniform flow where the depth of flow changes gradually along the length of the channel. The slope of the water surface relative to the bed is given by:
+          </p>
+          <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 font-mono text-sm text-center text-slate-800">
+             dy/dx = (S₀ - S_f) / (1 - Fr²)
+          </div>
+           <ul className="mt-4 space-y-2 text-sm text-slate-600">
+            <li><strong className="text-slate-800">S₀</strong> = Bed Slope</li>
+            <li><strong className="text-slate-800">S_f</strong> = Energy Slope (from Manning's)</li>
+            <li><strong className="text-slate-800">Fr</strong> = Froude Number</li>
+          </ul>
+        </section>
+
+        <section>
           <h3 className="text-lg font-semibold text-slate-900 mb-3 border-b border-slate-100 pb-2">Specific Energy</h3>
           <p className="text-slate-600 mb-4 leading-relaxed">
             Specific energy in a channel section is defined as the energy per pound of water at any section of a channel measured with respect to the channel bottom.
           </p>
           <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 font-mono text-sm text-center text-slate-800">
              E = y + V² / (2g)
-          </div>
-        </section>
-
-        <section>
-          <h3 className="text-lg font-semibold text-slate-900 mb-3 border-b border-slate-100 pb-2">Froude Number</h3>
-          <p className="text-slate-600 mb-4 leading-relaxed">
-            The Froude number is a dimensionless number defined as the ratio of the flow inertia to the external field (the latter in many applications simply being gravity).
-          </p>
-          <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 font-mono text-sm text-center text-slate-800">
-             Fr = V / sqrt(g * D_hyd)
-          </div>
-          <div className="mt-3 grid grid-cols-3 gap-4 text-center text-sm">
-             <div className="p-2 bg-emerald-50 text-emerald-700 rounded border border-emerald-100">Fr &lt; 1 <br/>Subcritical</div>
-             <div className="p-2 bg-amber-50 text-amber-700 rounded border border-amber-100">Fr = 1 <br/>Critical</div>
-             <div className="p-2 bg-rose-50 text-rose-700 rounded border border-rose-100">Fr &gt; 1 <br/>Supercritical</div>
           </div>
         </section>
       </div>
@@ -630,7 +873,6 @@ const App: React.FC = () => {
             <p className="text-lg text-slate-600 mb-6">
               Professional Open Channel Flow calculations made simple. Designed for civil engineers, students, and hydrologists.
             </p>
-            
             <div className="grid grid-cols-1 gap-6 max-w-sm mx-auto">
               <div className="flex flex-col items-center p-4 rounded-lg bg-slate-50 border border-slate-100">
                  <User className="w-8 h-8 text-brand-500 mb-3" />
@@ -639,7 +881,6 @@ const App: React.FC = () => {
                  <p className="text-sm text-slate-500">University of Moratuwa</p>
               </div>
             </div>
-
             <div className="mt-8 flex items-center justify-center gap-2 text-xs text-slate-400">
                <span className="px-2 py-1 rounded-full bg-slate-100">Supported by Gemini</span>
                <span>•</span>
@@ -652,8 +893,6 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-slate-100 text-slate-900 font-sans">
-      
-      {/* Sidebar */}
       <aside className="w-full md:w-72 bg-white border-r border-slate-200 flex-shrink-0 flex flex-col z-10 shadow-[4px_0_24px_rgba(0,0,0,0.02)]">
         <div className="p-6 border-b border-slate-100">
           <div className="flex items-center gap-2 text-brand-600">
@@ -664,8 +903,6 @@ const App: React.FC = () => {
         </div>
 
         <nav className="flex-1 p-4 space-y-6 overflow-y-auto">
-          
-          {/* Main Nav */}
           <div className="space-y-1">
             <button 
               onClick={() => setCurrentView('Calculator')}
@@ -682,6 +919,14 @@ const App: React.FC = () => {
             >
               <LineChart className="w-4 h-4" />
               Hydrograph
+            </button>
+            <button 
+               onClick={() => setCurrentView('CanalModel')}
+               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all
+                ${currentView === 'CanalModel' ? 'bg-slate-100 text-slate-900' : 'text-slate-600 hover:bg-slate-50'}`}
+            >
+              <Map className="w-4 h-4" />
+              Canal Model
             </button>
             <button 
                onClick={() => setCurrentView('Theory')}
@@ -709,7 +954,6 @@ const App: React.FC = () => {
             </button>
           </div>
 
-          {/* Calculator Sub-Nav */}
           {currentView === 'Calculator' && (
             <div className="pt-4 border-t border-slate-100">
               <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3 px-2">
@@ -737,9 +981,7 @@ const App: React.FC = () => {
               </div>
             </div>
           )}
-
         </nav>
-
         <div className="p-4 border-t border-slate-100 bg-slate-50">
            <button 
             onClick={toggleUnit}
@@ -750,12 +992,8 @@ const App: React.FC = () => {
           </button>
         </div>
       </aside>
-
-      {/* Main Content */}
       <main className="flex-1 overflow-y-auto h-screen p-4 md:p-8 scroll-smooth">
         <div className="max-w-7xl mx-auto">
-          
-          {/* Header Mobile */}
           <div className="md:hidden mb-6 flex justify-between items-center text-brand-600">
              <div className="flex items-center gap-2">
                 <Waves className="w-6 h-6" />
@@ -765,14 +1003,12 @@ const App: React.FC = () => {
                <SettingsIcon className="w-5 h-5 text-slate-600" />
              </button>
           </div>
-
-          {/* Dynamic Content */}
           {currentView === 'Calculator' && <CalculatorView />}
           {currentView === 'Hydrograph' && <HydrographView />}
+          {currentView === 'CanalModel' && <CanalModelView />}
           {currentView === 'Theory' && <TheoryView />}
           {currentView === 'Settings' && <SettingsView />}
           {currentView === 'About' && <AboutView />}
-
         </div>
       </main>
     </div>

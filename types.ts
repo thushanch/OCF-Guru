@@ -1,3 +1,4 @@
+
 export enum ChannelType {
   Rectangular = 'Rectangular',
   Trapezoidal = 'Trapezoidal',
@@ -9,11 +10,20 @@ export type UnitSystem = 'SI' | 'Imperial';
 
 export interface InputParams {
   flowRate: number; // Q
-  slope: number; // S
+  slope: number; // S (Used for single section or calculator)
   manningN: number; // n
   width: number; // b
   sideSlope: number; // z
   diameter: number; // D
+}
+
+export interface CanalSectionInput {
+  id: string;
+  inputMode: 'Slope' | 'Elevation';
+  length: number;
+  slope: number; // Used if mode is Slope
+  usElevation: number; // Used if mode is Elevation
+  dsElevation: number; // Used if mode is Elevation
 }
 
 export interface CalculationResult {
@@ -35,6 +45,22 @@ export interface SectionProperties {
   specificEnergy: number; // E
   specificForce: number; // M (Momentum)
   velocity: number; // V at this depth given Q
+}
+
+export interface ProfilePoint {
+  distance: number; // x location (Cumulative)
+  bedElevation: number; // z
+  waterElevation: number; // z + y
+  depth: number; // y
+  normalDepthElevation: number; // z + yn
+  criticalDepthElevation: number; // z + yc
+  sectionIndex: number; // To track which section this point belongs to
+}
+
+export interface BoundaryCondition {
+  location: 'Upstream' | 'Downstream';
+  type: 'KnownDepth' | 'NormalDepth' | 'CriticalDepth';
+  value: number; // Depth value
 }
 
 export const DEFAULT_PARAMS: Record<ChannelType, InputParams> = {
