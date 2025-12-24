@@ -10,7 +10,7 @@ export type UnitSystem = 'SI' | 'Imperial';
 
 export interface InputParams {
   flowRate: number; // Q
-  slope: number; // S (Used for single section or calculator)
+  slope: number; // S (Default/Reference)
   manningN: number; // n
   width: number; // b
   sideSlope: number; // z
@@ -21,9 +21,9 @@ export interface CanalSectionInput {
   id: string;
   inputMode: 'Slope' | 'Elevation';
   length: number;
-  slope: number; // Used if mode is Slope
-  usElevation: number; // Used if mode is Elevation
-  dsElevation: number; // Used if mode is Elevation
+  slope: number;
+  usElevation: number;
+  dsElevation: number;
 }
 
 export interface CalculationResult {
@@ -54,7 +54,8 @@ export interface ProfilePoint {
   depth: number; // y
   normalDepthElevation: number; // z + yn
   criticalDepthElevation: number; // z + yc
-  sectionIndex: number; // To track which section this point belongs to
+  sectionIndex: number;
+  regime: string; // M1, M2, S1, etc.
 }
 
 export interface BoundaryCondition {

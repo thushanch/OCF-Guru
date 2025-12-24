@@ -1,28 +1,9 @@
 
 import React, { useState, useEffect } from 'react';
 import { 
-  Calculator, 
-  Droplets, 
-  Settings as SettingsIcon, 
-  Activity, 
-  Waves, 
-  Square, 
-  Triangle, 
-  Circle, 
-  Spline,
-  Info,
-  Ruler,
-  Zap,
-  ArrowRightLeft,
-  BookOpen,
-  User,
-  LineChart,
-  Map,
-  ArrowRight,
-  Plus,
-  Trash2,
-  ChevronDown,
-  ChevronRight
+  Calculator, Droplets, Settings as SettingsIcon, Activity, Waves, Square, Triangle, Circle, Spline,
+  Info, Ruler, Zap, ArrowRightLeft, BookOpen, User, LineChart, Map, ArrowRight, Plus, Trash2, 
+  ChevronDown, HelpCircle, AlertCircle, TrendingUp
 } from 'lucide-react';
 import { ChannelType, InputParams, CalculationResult, DEFAULT_PARAMS, UnitSystem, SectionProperties, ProfilePoint, BoundaryCondition, CanalSectionInput } from './types';
 import { calculateFlow, calculateSectionProperties, solveNormalDepth, calculateMultiReachProfile } from './utils/calculations';
@@ -42,72 +23,40 @@ type AppView = 'Calculator' | 'Hydrograph' | 'CanalModel' | 'Theory' | 'Settings
 type ViewMode = 'Simple' | 'Advanced';
 
 const App: React.FC = () => {
-  // Navigation & App State
   const [currentView, setCurrentView] = useState<AppView>('Calculator');
   const [viewMode, setViewMode] = useState<ViewMode>('Advanced');
   const [unit, setUnit] = useState<UnitSystem>('SI');
   
-  // Calculator State
   const [activeTab, setActiveTab] = useState<ChannelType>(ChannelType.Trapezoidal);
   const [params, setParams] = useState<InputParams>(DEFAULT_PARAMS[ChannelType.Trapezoidal]);
   const [result, setResult] = useState<CalculationResult | null>(null);
   
-  // Section Analysis State
   const [analysisMode, setAnalysisMode] = useState<AnalysisMode>('Normal');
   const [customDepth, setCustomDepth] = useState<number>(1.0);
   const [sectionProps, setSectionProps] = useState<SectionProperties | null>(null);
 
-  // Hydrograph State
   const [hydroInput, setHydroInput] = useState<string>("0, 10\n1, 15\n2, 25\n3, 20\n4, 12\n5, 10");
   const [hydroData, setHydroData] = useState<{time: number, value: number}[]>([]);
 
-  // Canal Model State (Multi-Reach)
   const [canalSections, setCanalSections] = useState<CanalSectionInput[]>([
       { id: '1', inputMode: 'Slope', length: 1000, slope: 0.001, usElevation: 10, dsElevation: 9 }
   ]);
   const [boundaryCond, setBoundaryCond] = useState<BoundaryCondition>({
     location: 'Downstream',
-    type: 'KnownDepth',
-    value: 2.0
+    type: 'NormalDepth',
+    value: 1.0
   });
   const [profileData, setProfileData] = useState<ProfilePoint[]>([]);
 
-  // Unit Conversion Logic
   const toggleUnit = () => {
     setUnit(prev => {
       const newUnit = prev === 'SI' ? 'Imperial' : 'SI';
-      const factor = 3.28084;
-      const qFactor = 35.3147;
-
-      // Convert Params
-      const newParams = { ...params };
-      if (newUnit === 'Imperial') {
-        newParams.flowRate *= qFactor;
-        newParams.width *= factor;
-        newParams.diameter *= factor;
-      } else {
-        newParams.flowRate /= qFactor;
-        newParams.width /= factor;
-        newParams.diameter /= factor;
-      }
-      setParams(newParams);
-      
-      // Convert Custom Depth
-      setCustomDepth(d => newUnit === 'Imperial' ? d * factor : d / factor);
-
-      // Convert Canal Sections
-      setCanalSections(sections => sections.map(s => ({
-          ...s,
-          length: newUnit === 'Imperial' ? s.length * factor : s.length / factor,
-          usElevation: newUnit === 'Imperial' ? s.usElevation * factor : s.usElevation / factor,
-          dsElevation: newUnit === 'Imperial' ? s.dsElevation * factor : s.dsElevation / factor,
-      })));
-
-      setBoundaryCond(prev => ({
-          ...prev,
-          value: newUnit === 'Imperial' ? prev.value * factor : prev.value / factor
-      }));
-
+      const f = 3.28084;
+      const qf = 35.3147;
+      setParams(p => ({ ...p, flowRate: newUnit === 'Imperial' ? p.flowRate * qf : p.flowRate / qf, width: newUnit === 'Imperial' ? p.width * f : p.width / f, diameter: newUnit === 'Imperial' ? p.diameter * f : p.diameter / f }));
+      setCustomDepth(d => newUnit === 'Imperial' ? d * f : d / f);
+      setCanalSections(ss => ss.map(s => ({ ...s, length: newUnit === 'Imperial' ? s.length * f : s.length / f, usElevation: newUnit === 'Imperial' ? s.usElevation * f : s.usElevation / f, dsElevation: newUnit === 'Imperial' ? s.dsElevation * f : s.dsElevation / f })));
+      setBoundaryCond(bc => ({ ...bc, value: newUnit === 'Imperial' ? bc.value * f : bc.value / f }));
       return newUnit;
     });
   };
@@ -115,48 +64,9 @@ const App: React.FC = () => {
   const handleTabChange = (type: ChannelType) => {
     setActiveTab(type);
     const def = DEFAULT_PARAMS[type];
-    if (unit === 'Imperial') {
-      setParams({
-        ...def,
-        flowRate: def.flowRate * 35.3147,
-        width: def.width * 3.28084,
-        diameter: def.diameter * 3.28084,
-      });
-    } else {
-      setParams(def);
-    }
-    setAnalysisMode('Normal');
+    setParams(unit === 'Imperial' ? { ...def, flowRate: def.flowRate * 35.3147, width: def.width * 3.28084, diameter: def.diameter * 3.28084 } : def);
   };
 
-  const handleChange = (field: keyof InputParams, value: string) => {
-    const numVal = parseFloat(value);
-    setParams(prev => ({
-      ...prev,
-      [field]: isNaN(numVal) ? 0 : numVal
-    }));
-  };
-
-  // Process Hydrograph Data
-  useEffect(() => {
-    const lines = hydroInput.trim().split('\n');
-    const data: {time: number, value: number}[] = [];
-    
-    lines.forEach(line => {
-        const parts = line.split(/[,\t\s]+/);
-        if (parts.length >= 2) {
-            const t = parseFloat(parts[0]);
-            const q = parseFloat(parts[1]);
-            if (!isNaN(t) && !isNaN(q)) {
-                const tempParams = { ...params, flowRate: q };
-                const y = solveNormalDepth(activeTab, tempParams, unit);
-                data.push({ time: t, value: y });
-            }
-        }
-    });
-    setHydroData(data);
-  }, [hydroInput, params, activeTab, unit]);
-
-  // Effects
   useEffect(() => {
     const res = calculateFlow(activeTab, params, unit);
     setResult(res);
@@ -164,855 +74,297 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (!result) return;
-    let depth = 0;
-    if (analysisMode === 'Normal') depth = result.normalDepth;
-    else if (analysisMode === 'Critical') depth = result.criticalDepth;
-    else depth = customDepth;
-    if (isNaN(depth)) depth = 0;
-    const props = calculateSectionProperties(activeTab, depth, params, unit);
-    setSectionProps(props);
+    const depth = analysisMode === 'Normal' ? result.normalDepth : analysisMode === 'Critical' ? result.criticalDepth : customDepth;
+    setSectionProps(calculateSectionProperties(activeTab, depth, params, unit));
   }, [activeTab, params, unit, analysisMode, customDepth, result]);
 
-  // Handle Canal Model Run
-  const handleRunCanalModel = () => {
-    let val = boundaryCond.value;
-    if (result) {
-        if (boundaryCond.type === 'NormalDepth') val = result.normalDepth;
-        if (boundaryCond.type === 'CriticalDepth') val = result.criticalDepth;
-    }
-    const finalBC = { ...boundaryCond, value: val };
-    const points = calculateMultiReachProfile(activeTab, params, canalSections, finalBC, unit);
-    setProfileData(points);
-  };
-
   const addCanalSection = () => {
-      if (canalSections.length >= 5) return;
-      const last = canalSections[canalSections.length - 1];
-      const newId = (parseInt(last.id) + 1).toString();
-      
-      // Default to continuous
-      const newSec: CanalSectionInput = {
-          id: newId,
-          inputMode: last.inputMode,
-          length: last.length,
-          slope: last.slope,
-          usElevation: last.dsElevation, // Connect
-          dsElevation: last.dsElevation - (last.slope * last.length)
-      };
-      setCanalSections([...canalSections, newSec]);
-  };
-
-  const removeCanalSection = (id: string) => {
-      if (canalSections.length <= 1) return;
-      setCanalSections(canalSections.filter(s => s.id !== id));
+    if (canalSections.length >= 5) return;
+    const last = canalSections[canalSections.length - 1];
+    setCanalSections([...canalSections, { id: Date.now().toString(), inputMode: last.inputMode, length: last.length, slope: last.slope, usElevation: last.dsElevation, dsElevation: last.dsElevation - (last.slope * last.length) }]);
   };
 
   const updateSection = (id: string, field: keyof CanalSectionInput, value: any) => {
-      setCanalSections(sections => sections.map(s => 
-          s.id === id ? { ...s, [field]: value } : s
-      ));
+    setCanalSections(ss => ss.map(s => s.id === id ? { ...s, [field]: value } : s));
   };
 
-
-  // Labels
-  const U = {
-    L: unit === 'SI' ? 'm' : 'ft',
-    Q: unit === 'SI' ? 'm³/s' : 'ft³/s',
-    V: unit === 'SI' ? 'm/s' : 'ft/s',
-    Area: unit === 'SI' ? 'm²' : 'ft²',
-    Force: unit === 'SI' ? 'm³' : 'ft³',
-    Energy: unit === 'SI' ? 'm' : 'ft',
+  const handleRunModel = () => {
+    let val = boundaryCond.value;
+    if (result) {
+      if (boundaryCond.type === 'NormalDepth') val = result.normalDepth;
+      else if (boundaryCond.type === 'CriticalDepth') val = result.criticalDepth;
+    }
+    setProfileData(calculateMultiReachProfile(activeTab, params, canalSections, { ...boundaryCond, value: val }, unit));
   };
 
-  // --- SUB-COMPONENTS ---
+  const U = { L: unit === 'SI' ? 'm' : 'ft', Q: unit === 'SI' ? 'm³/s' : 'ft³/s', V: unit === 'SI' ? 'm/s' : 'ft/s', Area: unit === 'SI' ? 'm²' : 'ft²', Energy: unit === 'SI' ? 'm' : 'ft' };
 
-  const CalculatorView = () => (
-    <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
-      <div className="xl:col-span-4 space-y-6">
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-          <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
-            <h2 className="font-semibold text-slate-800 flex items-center gap-2">
-              <SettingsIcon className="w-4 h-4 text-slate-400" />
-              Parameters ({unit})
-            </h2>
-          </div>
-          <div className="p-6 space-y-5">
-            <div className="space-y-4">
-              <label className="block">
-                <span className="text-sm font-medium text-slate-700 mb-1 block">Flow Rate Q ({U.Q})</span>
-                <input 
-                  type="number" 
-                  step="0.1" 
-                  value={params.flowRate.toFixed(3)} 
-                  onChange={(e) => handleChange('flowRate', e.target.value)}
-                  className="w-full bg-white text-slate-900 rounded-md border-slate-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 sm:text-sm p-2 border"
-                />
-              </label>
-
-              <div className="grid grid-cols-2 gap-4">
-                <label className="block">
-                  <span className="text-sm font-medium text-slate-700 mb-1 block">Slope S (ft/ft, m/m)</span>
-                  <input 
-                    type="number" 
-                    step="0.0001" 
-                    value={params.slope} 
-                    onChange={(e) => handleChange('slope', e.target.value)}
-                    className="w-full bg-white text-slate-900 rounded-md border-slate-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 sm:text-sm p-2 border"
-                  />
-                </label>
-                <label className="block">
-                  <span className="text-sm font-medium text-slate-700 mb-1 block">Manning's n</span>
-                  <input 
-                    type="number" 
-                    step="0.001" 
-                    value={params.manningN} 
-                    onChange={(e) => handleChange('manningN', e.target.value)}
-                    className="w-full bg-white text-slate-900 rounded-md border-slate-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 sm:text-sm p-2 border"
-                  />
-                </label>
-              </div>
-            </div>
-
-            <div className="border-t border-slate-100 pt-4 space-y-4">
-              <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Channel Geometry</h3>
-              
-              {activeTab !== ChannelType.Triangular && activeTab !== ChannelType.Circular && (
-                <label className="block">
-                  <span className="text-sm font-medium text-slate-700 mb-1 block">Bottom Width b ({U.L})</span>
-                  <input 
-                    type="number" 
-                    value={params.width.toFixed(3)} 
-                    onChange={(e) => handleChange('width', e.target.value)}
-                    className="w-full bg-white text-slate-900 rounded-md border-slate-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 sm:text-sm p-2 border"
-                  />
-                </label>
-              )}
-
-              {activeTab === ChannelType.Circular && (
-                <label className="block">
-                  <span className="text-sm font-medium text-slate-700 mb-1 block">Diameter D ({U.L})</span>
-                  <input 
-                    type="number" 
-                    value={params.diameter.toFixed(3)} 
-                    onChange={(e) => handleChange('diameter', e.target.value)}
-                    className="w-full bg-white text-slate-900 rounded-md border-slate-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 sm:text-sm p-2 border"
-                  />
-                </label>
-              )}
-
-              {(activeTab === ChannelType.Trapezoidal || activeTab === ChannelType.Triangular) && (
-                <label className="block">
-                  <span className="text-sm font-medium text-slate-700 mb-1 block">Side Slope z (H:V)</span>
-                  <input 
-                    type="number" 
-                    step="0.1" 
-                    value={params.sideSlope} 
-                    onChange={(e) => handleChange('sideSlope', e.target.value)}
-                    className="w-full bg-white text-slate-900 rounded-md border-slate-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 sm:text-sm p-2 border"
-                  />
-                </label>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {viewMode === 'Advanced' && (
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
-              <h2 className="font-semibold text-slate-800 flex items-center gap-2">
-                <Ruler className="w-4 h-4 text-slate-400" />
-                Section Analysis
-              </h2>
-            </div>
-            <div className="p-6 space-y-4">
-              <div className="flex rounded-md shadow-sm" role="group">
-                <button 
-                  type="button" 
-                  onClick={() => setAnalysisMode('Normal')}
-                  className={`px-4 py-2 text-xs font-medium rounded-l-lg border ${analysisMode === 'Normal' ? 'bg-brand-50 text-brand-700 border-brand-200 z-10' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}
-                >
-                  Normal Depth
-                </button>
-                <button 
-                  type="button" 
-                  onClick={() => setAnalysisMode('Critical')}
-                  className={`px-4 py-2 text-xs font-medium border-t border-b ${analysisMode === 'Critical' ? 'bg-brand-50 text-brand-700 border-brand-200 z-10' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}
-                >
-                  Critical Depth
-                </button>
-                <button 
-                  type="button" 
-                  onClick={() => setAnalysisMode('Custom')}
-                  className={`px-4 py-2 text-xs font-medium rounded-r-lg border ${analysisMode === 'Custom' ? 'bg-brand-50 text-brand-700 border-brand-200 z-10' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}
-                >
-                  Custom
-                </button>
-              </div>
-
-              {analysisMode === 'Custom' && (
-                <label className="block">
-                  <span className="text-xs font-medium text-slate-500 uppercase mb-1 block">Custom Depth y ({U.L})</span>
-                  <input 
-                    type="number" 
-                    step="0.01" 
-                    value={customDepth} 
-                    onChange={(e) => setCustomDepth(parseFloat(e.target.value) || 0)}
-                    className="w-full bg-white text-slate-900 rounded-md border-slate-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 sm:text-sm p-2 border"
-                  />
-                </label>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div className="xl:col-span-8 space-y-6">
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-1 overflow-hidden h-[420px] flex flex-col">
-          <div className="px-5 py-3 flex items-center justify-between bg-white border-b border-slate-100">
-            <h2 className="font-semibold text-slate-800 flex items-center gap-2">
-              <Droplets className="w-4 h-4 text-brand-500" />
-              Cross-Section {viewMode === 'Advanced' ? `: ${analysisMode} Depth` : ''}
-            </h2>
-            {sectionProps && (
-              <div className="flex items-center gap-4 text-xs font-medium">
-                  <span className="flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-sky-500"></span>
-                    y = {sectionProps.depth.toFixed(3)} {U.L}
-                  </span>
-              </div>
-            )}
-          </div>
-          <div className="flex-1 bg-slate-50 relative flex items-center justify-center">
-            {sectionProps && (
-              <ChannelVisualizer 
-                type={activeTab} 
-                params={params} 
-                displayDepth={sectionProps.depth}
-                criticalDepth={result?.criticalDepth}
-              />
-            )}
-          </div>
-        </div>
-
-        {result && !result.error ? (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 relative overflow-hidden group md:col-span-1">
-              <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
-                <Activity className="w-16 h-16 text-brand-600" />
-              </div>
-              <p className="text-sm text-slate-500 font-medium mb-1">Flow Condition</p>
-              <div className="text-2xl font-bold text-slate-900">{result.flowRegime}</div>
-              <div className="mt-2 flex items-center gap-2">
-                  <span className={`px-2 py-1 rounded text-xs font-semibold border ${
-                    result.flowRegime === 'Supercritical' 
-                    ? 'bg-rose-50 text-rose-700 border-rose-100' 
-                    : result.flowRegime === 'Subcritical' 
-                      ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                      : 'bg-amber-50 text-amber-700 border-amber-100'
-                  }`}>
-                    Fr = {result.froudeNumber.toFixed(2)}
-                  </span>
-              </div>
-            </div>
-
-            <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 flex flex-col justify-center md:col-span-2">
-              <div className="grid grid-cols-3 gap-4 text-center">
-                  <div>
-                      <p className="text-xs text-slate-400 uppercase tracking-wide font-semibold mb-1">Normal Depth</p>
-                      <p className="text-xl font-bold text-brand-600">{result.normalDepth.toFixed(3)} <span className="text-sm font-normal text-slate-400">{U.L}</span></p>
-                  </div>
-                    <div>
-                      <p className="text-xs text-slate-400 uppercase tracking-wide font-semibold mb-1">Critical Depth</p>
-                      <p className="text-xl font-bold text-slate-800">{result.criticalDepth.toFixed(3)} <span className="text-sm font-normal text-slate-400">{U.L}</span></p>
-                  </div>
-                  <div>
-                      <p className="text-xs text-slate-400 uppercase tracking-wide font-semibold mb-1">Avg Velocity</p>
-                      <p className="text-xl font-bold text-slate-800">{result.velocity.toFixed(2)} <span className="text-sm font-normal text-slate-400">{U.V}</span></p>
-                  </div>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="bg-rose-50 border border-rose-200 rounded-xl p-6 text-center text-rose-800">
-            <h3 className="font-bold mb-1">Calculation Error</h3>
-            <p className="text-sm">{result?.error || "Invalid Parameters"}</p>
-          </div>
-        )}
-
-        {sectionProps && viewMode === 'Advanced' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                <div className="px-5 py-3 bg-slate-50/50 border-b border-slate-100">
-                  <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
-                      <Calculator className="w-4 h-4 text-slate-400" /> 
-                      Section Properties (at y = {sectionProps.depth.toFixed(3)} {U.L})
-                  </h3>
-                </div>
-                <div className="p-5 space-y-3">
-                  <div className="flex justify-between items-center p-2 hover:bg-slate-50 rounded">
-                    <span className="text-sm text-slate-500">Wetted Area (A)</span>
-                    <span className="font-mono font-medium text-slate-700">{sectionProps.area.toFixed(3)} {U.Area}</span>
-                  </div>
-                  <div className="flex justify-between items-center p-2 hover:bg-slate-50 rounded">
-                    <span className="text-sm text-slate-500">Wetted Perimeter (P)</span>
-                    <span className="font-mono font-medium text-slate-700">{sectionProps.perimeter.toFixed(3)} {U.L}</span>
-                  </div>
-                  <div className="flex justify-between items-center p-2 hover:bg-slate-50 rounded">
-                    <span className="text-sm text-slate-500">Hydraulic Radius (R)</span>
-                    <span className="font-mono font-medium text-slate-700">{sectionProps.hydraulicRadius.toFixed(3)} {U.L}</span>
-                  </div>
-                  <div className="flex justify-between items-center p-2 hover:bg-slate-50 rounded">
-                    <span className="text-sm text-slate-500">Top Width (T)</span>
-                    <span className="font-mono font-medium text-slate-700">{sectionProps.topWidth.toFixed(3)} {U.L}</span>
-                  </div>
-                </div>
-            </div>
-
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                <div className="px-5 py-3 bg-slate-50/50 border-b border-slate-100">
-                  <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
-                      <Zap className="w-4 h-4 text-amber-500" /> 
-                      Energy & Momentum
-                  </h3>
-                </div>
-                <div className="p-5 space-y-4">
-                  <div>
-                      <div className="flex justify-between mb-1">
-                          <span className="text-sm text-slate-500">Specific Energy (E)</span>
-                          <span className="text-sm font-bold text-slate-800">{sectionProps.specificEnergy.toFixed(3)} {U.Energy}</span>
-                      </div>
-                      <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
-                          <div className="h-full bg-amber-400 rounded-full" style={{width: '60%'}}></div>
-                      </div>
-                      <p className="text-[10px] text-slate-400 mt-1">E = y + V²/2g</p>
-                  </div>
-
-                  <div>
-                      <div className="flex justify-between mb-1">
-                          <span className="text-sm text-slate-500">Specific Force (M)</span>
-                          <span className="text-sm font-bold text-slate-800">{sectionProps.specificForce.toFixed(3)} {U.Force}</span>
-                      </div>
-                      <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
-                          <div className="h-full bg-indigo-400 rounded-full" style={{width: '60%'}}></div>
-                      </div>
-                      <p className="text-[10px] text-slate-400 mt-1">M = Q²/gA + Aȳ</p>
-                  </div>
-                </div>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-
-  const HydrographView = () => (
-    <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 h-full">
-      <div className="xl:col-span-4 space-y-6">
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-          <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
-            <h2 className="font-semibold text-slate-800 flex items-center gap-2">
-              <LineChart className="w-4 h-4 text-slate-400" />
-              Input Hydrograph
-            </h2>
-          </div>
-          <div className="p-6 space-y-4">
-             <div className="space-y-2">
-                <label className="block text-sm font-medium text-slate-700">
-                   Time vs Flow Series
-                </label>
-                <p className="text-xs text-slate-500">
-                   Enter data points as "Time, Flow". <br/>
-                   Time in hours/sec (arbitrary), Flow in {U.Q}.
-                </p>
-                <textarea 
-                   value={hydroInput}
-                   onChange={(e) => setHydroInput(e.target.value)}
-                   rows={10}
-                   className="w-full font-mono text-sm p-3 border border-slate-300 rounded-md focus:ring-brand-500 focus:border-brand-500"
-                   placeholder="0, 10&#10;1, 15&#10;2, 25"
-                />
-             </div>
-             <div className="bg-slate-50 p-3 rounded text-xs text-slate-600 border border-slate-200">
-                <p>The system will calculate the corresponding <strong>Normal Depth</strong> for each flow rate based on the channel parameters set in the Calculator tab.</p>
-             </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="xl:col-span-8 space-y-6">
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden h-[500px] flex flex-col">
-            <div className="px-6 py-4 border-b border-slate-100 bg-white flex justify-between items-center">
-                <h2 className="font-semibold text-slate-800 flex items-center gap-2">
-                    <Activity className="w-4 h-4 text-brand-500" />
-                    Depth Hydrograph (Stage vs Time)
-                </h2>
-            </div>
-            <div className="flex-1 bg-slate-50 p-4">
-                 {hydroData.length > 0 ? (
-                     <TimeSeriesChart 
-                        data={hydroData} 
-                        xLabel="Time" 
-                        yLabel={`Normal Depth (${U.L})`} 
-                        color="#0ea5e9"
-                     />
-                 ) : (
-                     <div className="w-full h-full flex flex-col items-center justify-center text-slate-400">
-                         <LineChart className="w-12 h-12 mb-2 opacity-20" />
-                         <p className="text-sm">Enter data points to visualize depth hydrograph.</p>
-                     </div>
-                 )}
-            </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  const CanalModelView = () => (
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 h-full">
-         <div className="xl:col-span-4 space-y-6">
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col max-h-[800px]">
-                <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
-                    <h2 className="font-semibold text-slate-800 flex items-center gap-2">
-                        <Map className="w-4 h-4 text-slate-400" />
-                        Model Configuration
-                    </h2>
-                </div>
-                <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                   
-                   <div className="p-3 bg-slate-50 border border-slate-100 rounded-md text-xs text-slate-500 space-y-1">
-                       <p className="font-semibold text-slate-700">Calculated Geometry:</p>
-                       <div className="flex justify-between"><span>Type:</span> <span>{activeTab}</span></div>
-                       <div className="flex justify-between"><span>Q:</span> <span>{params.flowRate} {U.Q}</span></div>
-                   </div>
-
-                   {/* Sections List */}
-                   <div className="space-y-4">
-                      <div className="flex items-center justify-between">
-                         <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Reach Sections ({canalSections.length}/5)</h3>
-                         <button onClick={addCanalSection} disabled={canalSections.length >= 5} className="text-brand-600 hover:text-brand-700 disabled:opacity-50">
-                            <Plus className="w-4 h-4" />
-                         </button>
-                      </div>
-                      
-                      {canalSections.map((sec, idx) => (
-                         <div key={sec.id} className="border border-slate-200 rounded-lg p-3 space-y-3 bg-white">
-                             <div className="flex items-center justify-between">
-                                <span className="text-sm font-medium text-slate-700">Section {idx + 1}</span>
-                                {idx > 0 && <button onClick={() => removeCanalSection(sec.id)}><Trash2 className="w-3 h-3 text-slate-400 hover:text-rose-500" /></button>}
-                             </div>
-                             
-                             <div className="flex rounded shadow-sm">
-                                <button 
-                                   onClick={() => updateSection(sec.id, 'inputMode', 'Slope')}
-                                   className={`flex-1 text-[10px] py-1 border rounded-l ${sec.inputMode === 'Slope' ? 'bg-brand-50 text-brand-700 border-brand-200' : 'bg-white text-slate-500 border-slate-200'}`}
-                                >
-                                   Slope/Len
-                                </button>
-                                <button 
-                                   onClick={() => updateSection(sec.id, 'inputMode', 'Elevation')}
-                                   className={`flex-1 text-[10px] py-1 border-t border-b border-r rounded-r ${sec.inputMode === 'Elevation' ? 'bg-brand-50 text-brand-700 border-brand-200' : 'bg-white text-slate-500 border-slate-200'}`}
-                                >
-                                   Elevations
-                                </button>
-                             </div>
-
-                             <div className="grid grid-cols-2 gap-2">
-                                <label className="block">
-                                   <span className="text-[10px] text-slate-500 block">Length ({U.L})</span>
-                                   <input 
-                                      type="number" value={sec.length} 
-                                      onChange={(e) => updateSection(sec.id, 'length', parseFloat(e.target.value))}
-                                      className="w-full text-sm p-1 border border-slate-300 rounded" 
-                                   />
-                                </label>
-                                {sec.inputMode === 'Slope' ? (
-                                   <label className="block">
-                                      <span className="text-[10px] text-slate-500 block">Slope</span>
-                                      <input 
-                                         type="number" step="0.0001" value={sec.slope} 
-                                         onChange={(e) => updateSection(sec.id, 'slope', parseFloat(e.target.value))}
-                                         className="w-full text-sm p-1 border border-slate-300 rounded" 
-                                      />
-                                   </label>
-                                ) : (
-                                    <div className="col-span-2 grid grid-cols-2 gap-2">
-                                        <label className="block">
-                                            <span className="text-[10px] text-slate-500 block">US Elev ({U.L})</span>
-                                            <input 
-                                                type="number" value={sec.usElevation} 
-                                                onChange={(e) => updateSection(sec.id, 'usElevation', parseFloat(e.target.value))}
-                                                className="w-full text-sm p-1 border border-slate-300 rounded" 
-                                            />
-                                        </label>
-                                        <label className="block">
-                                            <span className="text-[10px] text-slate-500 block">DS Elev ({U.L})</span>
-                                            <input 
-                                                type="number" value={sec.dsElevation} 
-                                                onChange={(e) => updateSection(sec.id, 'dsElevation', parseFloat(e.target.value))}
-                                                className="w-full text-sm p-1 border border-slate-300 rounded" 
-                                            />
-                                        </label>
-                                    </div>
-                                )}
-                             </div>
-                         </div>
-                      ))}
-                   </div>
-                   
-                   <div className="space-y-3 pt-4 border-t border-slate-100">
-                        <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Boundary Conditions</h3>
-                        
-                        <div className="grid grid-cols-2 gap-2">
-                            <button 
-                                onClick={() => setBoundaryCond(prev => ({ ...prev, location: 'Upstream' }))}
-                                className={`px-3 py-2 text-xs font-medium rounded border text-center ${boundaryCond.location === 'Upstream' ? 'bg-brand-50 text-brand-700 border-brand-200' : 'bg-white text-slate-600 border-slate-200'}`}
-                            >
-                                Upstream End
-                            </button>
-                            <button 
-                                onClick={() => setBoundaryCond(prev => ({ ...prev, location: 'Downstream' }))}
-                                className={`px-3 py-2 text-xs font-medium rounded border text-center ${boundaryCond.location === 'Downstream' ? 'bg-brand-50 text-brand-700 border-brand-200' : 'bg-white text-slate-600 border-slate-200'}`}
-                            >
-                                Downstream End
-                            </button>
-                        </div>
-
-                        <div className="space-y-2 mt-2">
-                             <label className="flex items-center gap-2 text-sm text-slate-700">
-                                 <input 
-                                    type="radio" 
-                                    name="bcType" 
-                                    checked={boundaryCond.type === 'KnownDepth'} 
-                                    onChange={() => setBoundaryCond(prev => ({ ...prev, type: 'KnownDepth' }))}
-                                 />
-                                 Known Depth y
-                             </label>
-                             {boundaryCond.type === 'KnownDepth' && (
-                                 <input 
-                                    type="number"
-                                    step="0.01"
-                                    value={boundaryCond.value}
-                                    onChange={(e) => setBoundaryCond(prev => ({ ...prev, value: parseFloat(e.target.value) || 0 }))} 
-                                    className="w-full ml-6 max-w-[120px] p-1 text-sm border border-slate-300 rounded"
-                                 />
-                             )}
-                             
-                             <label className="flex items-center gap-2 text-sm text-slate-700">
-                                 <input 
-                                    type="radio" 
-                                    name="bcType" 
-                                    checked={boundaryCond.type === 'NormalDepth'} 
-                                    onChange={() => setBoundaryCond(prev => ({ ...prev, type: 'NormalDepth' }))}
-                                 />
-                                 Normal Depth
-                             </label>
-
-                             <label className="flex items-center gap-2 text-sm text-slate-700">
-                                 <input 
-                                    type="radio" 
-                                    name="bcType" 
-                                    checked={boundaryCond.type === 'CriticalDepth'} 
-                                    onChange={() => setBoundaryCond(prev => ({ ...prev, type: 'CriticalDepth' }))}
-                                 />
-                                 Critical Depth
-                             </label>
-                        </div>
-                   </div>
-
-                   <button 
-                      onClick={handleRunCanalModel}
-                      className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-brand-600 hover:bg-brand-700 text-white font-medium rounded-lg shadow-sm transition-colors"
-                   >
-                      <ArrowRight className="w-4 h-4" />
-                      Run Model
-                   </button>
-                </div>
-            </div>
-         </div>
-
-         <div className="xl:col-span-8 space-y-6">
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden h-[500px] flex flex-col">
-                <div className="px-6 py-4 border-b border-slate-100 bg-white flex justify-between items-center">
-                    <h2 className="font-semibold text-slate-800 flex items-center gap-2">
-                        <Activity className="w-4 h-4 text-brand-500" />
-                        Water Surface Profile
-                    </h2>
-                    {profileData.length > 0 && (
-                        <span className="text-xs text-slate-500 font-mono bg-slate-100 px-2 py-1 rounded">
-                            {profileData.length} pts
-                        </span>
-                    )}
-                </div>
-                <div className="flex-1 bg-slate-50 p-4">
-                     {profileData.length > 0 ? (
-                         <ProfileChart data={profileData} unitLabel={U.L} />
-                     ) : (
-                         <div className="w-full h-full flex flex-col items-center justify-center text-slate-400">
-                             <Map className="w-12 h-12 mb-2 opacity-20" />
-                             <p className="text-sm">Configure reaches and click 'Run Model' to visualize.</p>
-                         </div>
-                     )}
-                </div>
-            </div>
-         </div>
-      </div>
-  );
-
-  const TheoryView = () => (
-    <div className="max-w-4xl mx-auto bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-      <div className="px-8 py-6 border-b border-slate-100 bg-slate-50/50">
-        <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-          <BookOpen className="w-6 h-6 text-brand-600" />
-          Theoretical Background
-        </h2>
-        <p className="text-slate-500 mt-1">Fundamental equations used in Open Channel Flow calculations.</p>
-      </div>
-      <div className="p-8 space-y-8">
-        <section>
-          <h3 className="text-lg font-semibold text-slate-900 mb-3 border-b border-slate-100 pb-2">Manning's Equation</h3>
-          <p className="text-slate-600 mb-4 leading-relaxed">
-            The Manning formula is an empirical formula estimating the average velocity of a liquid flowing in a conduit that does not completely enclose the liquid.
-          </p>
-          <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 font-mono text-sm text-center text-slate-800">
-             V = (k/n) * R^(2/3) * S^(1/2)
-          </div>
-          <ul className="mt-4 space-y-2 text-sm text-slate-600">
-            <li><strong className="text-slate-800">V</strong> = Flow Velocity ({U.V})</li>
-            <li><strong className="text-slate-800">k</strong> = 1.0 for SI units, 1.486 for Imperial units</li>
-            <li><strong className="text-slate-800">n</strong> = Manning's Roughness Coefficient</li>
-            <li><strong className="text-slate-800">R</strong> = Hydraulic Radius (A/P)</li>
-            <li><strong className="text-slate-800">S</strong> = Channel Bed Slope</li>
-          </ul>
-        </section>
-
-        <section>
-          <h3 className="text-lg font-semibold text-slate-900 mb-3 border-b border-slate-100 pb-2">Gradually Varied Flow (GVF)</h3>
-          <p className="text-slate-600 mb-4 leading-relaxed">
-             GVF describes steady non-uniform flow where the depth of flow changes gradually along the length of the channel. The slope of the water surface relative to the bed is given by:
-          </p>
-          <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 font-mono text-sm text-center text-slate-800">
-             dy/dx = (S₀ - S_f) / (1 - Fr²)
-          </div>
-           <ul className="mt-4 space-y-2 text-sm text-slate-600">
-            <li><strong className="text-slate-800">S₀</strong> = Bed Slope</li>
-            <li><strong className="text-slate-800">S_f</strong> = Energy Slope (from Manning's)</li>
-            <li><strong className="text-slate-800">Fr</strong> = Froude Number</li>
-          </ul>
-        </section>
-
-        <section>
-          <h3 className="text-lg font-semibold text-slate-900 mb-3 border-b border-slate-100 pb-2">Specific Energy</h3>
-          <p className="text-slate-600 mb-4 leading-relaxed">
-            Specific energy in a channel section is defined as the energy per pound of water at any section of a channel measured with respect to the channel bottom.
-          </p>
-          <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 font-mono text-sm text-center text-slate-800">
-             E = y + V² / (2g)
-          </div>
-        </section>
-      </div>
-    </div>
-  );
-
-  const SettingsView = () => (
-    <div className="max-w-2xl mx-auto bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-       <div className="px-8 py-6 border-b border-slate-100 bg-slate-50/50">
-        <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-          <SettingsIcon className="w-6 h-6 text-slate-600" />
-          Settings
-        </h2>
-      </div>
-      <div className="p-8 space-y-6">
-         <div className="flex items-center justify-between pb-6 border-b border-slate-100">
-            <div>
-               <h3 className="text-lg font-medium text-slate-900">Interface Mode</h3>
-               <p className="text-sm text-slate-500">Toggle between simplified and detailed engineering views.</p>
-            </div>
-            <div className="flex items-center bg-slate-100 rounded-lg p-1">
-               <button 
-                 onClick={() => setViewMode('Simple')}
-                 className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${viewMode === 'Simple' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-               >
-                 Simple
-               </button>
-               <button 
-                 onClick={() => setViewMode('Advanced')}
-                 className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${viewMode === 'Advanced' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-               >
-                 Advanced
-               </button>
-            </div>
-         </div>
-
-         <div className="flex items-center justify-between pb-6 border-b border-slate-100">
-            <div>
-               <h3 className="text-lg font-medium text-slate-900">Unit System</h3>
-               <p className="text-sm text-slate-500">Switch between SI (Metric) and Imperial units.</p>
-            </div>
-            <button 
-              onClick={toggleUnit}
-              className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 active:bg-slate-100 transition-colors"
-            >
-              <ArrowRightLeft className="w-4 h-4" />
-              Currently: {unit}
-            </button>
-         </div>
-      </div>
-    </div>
-  );
-
-  const AboutView = () => (
-    <div className="max-w-2xl mx-auto">
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-6">
-         <div className="h-32 bg-gradient-to-r from-brand-600 to-brand-400 flex items-center justify-center">
-            <div className="text-center text-white">
-               <Waves className="w-12 h-12 mx-auto mb-2 opacity-90" />
-               <h1 className="text-3xl font-bold tracking-tight">OCF Guru</h1>
-            </div>
-         </div>
-         <div className="p-8 text-center">
-            <p className="text-lg text-slate-600 mb-6">
-              Professional Open Channel Flow calculations made simple. Designed for civil engineers, students, and hydrologists.
-            </p>
-            <div className="grid grid-cols-1 gap-6 max-w-sm mx-auto">
-              <div className="flex flex-col items-center p-4 rounded-lg bg-slate-50 border border-slate-100">
-                 <User className="w-8 h-8 text-brand-500 mb-3" />
-                 <h3 className="font-semibold text-slate-900">Created By</h3>
-                 <p className="text-slate-700 mt-1">Thushan Chamika</p>
-                 <p className="text-sm text-slate-500">University of Moratuwa</p>
-              </div>
-            </div>
-            <div className="mt-8 flex items-center justify-center gap-2 text-xs text-slate-400">
-               <span className="px-2 py-1 rounded-full bg-slate-100">Supported by Gemini</span>
-               <span>•</span>
-               <span>v1.2.0</span>
-            </div>
-         </div>
+  const TheoryPrompt = ({ title, desc }: { title: string, desc: string }) => (
+    <div className="group relative inline-block ml-1">
+      <HelpCircle className="w-3.5 h-3.5 text-slate-300 cursor-help hover:text-brand-500 transition-colors" />
+      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-48 p-2 bg-slate-800 text-white text-[10px] rounded shadow-lg z-50">
+        <p className="font-bold border-b border-slate-700 mb-1 pb-1">{title}</p>
+        {desc}
       </div>
     </div>
   );
 
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-slate-100 text-slate-900 font-sans">
-      <aside className="w-full md:w-72 bg-white border-r border-slate-200 flex-shrink-0 flex flex-col z-10 shadow-[4px_0_24px_rgba(0,0,0,0.02)]">
+      <aside className="w-full md:w-72 bg-white border-r border-slate-200 flex-shrink-0 flex flex-col z-10 shadow-sm">
         <div className="p-6 border-b border-slate-100">
           <div className="flex items-center gap-2 text-brand-600">
             <Waves className="w-8 h-8" />
             <span className="text-2xl font-bold tracking-tight">OCF Guru</span>
           </div>
-          <p className="text-xs text-slate-400 mt-1">Open Channel Flow Calculator</p>
+          <p className="text-xs text-slate-400 mt-1 uppercase font-semibold">Civil Engineering Toolkit</p>
         </div>
-
-        <nav className="flex-1 p-4 space-y-6 overflow-y-auto">
-          <div className="space-y-1">
-            <button 
-              onClick={() => setCurrentView('Calculator')}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all
-                ${currentView === 'Calculator' ? 'bg-slate-100 text-slate-900' : 'text-slate-600 hover:bg-slate-50'}`}
-            >
-              <Calculator className="w-4 h-4" />
-              Calculator
+        <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
+          {[
+            { id: 'Calculator', icon: Calculator, label: 'Single Section' },
+            { id: 'CanalModel', icon: Map, label: 'Canal Modeling' },
+            { id: 'Hydrograph', icon: LineChart, label: 'Hydrograph' },
+            { id: 'Theory', icon: BookOpen, label: 'OCF Theory' },
+            { id: 'Settings', icon: SettingsIcon, label: 'Settings' },
+            { id: 'About', icon: Info, label: 'About' }
+          ].map(v => (
+            <button key={v.id} onClick={() => setCurrentView(v.id as AppView)} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${currentView === v.id ? 'bg-brand-50 text-brand-700 shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}>
+              <v.icon className="w-4 h-4" /> {v.label}
             </button>
-            <button 
-               onClick={() => setCurrentView('Hydrograph')}
-               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all
-                ${currentView === 'Hydrograph' ? 'bg-slate-100 text-slate-900' : 'text-slate-600 hover:bg-slate-50'}`}
-            >
-              <LineChart className="w-4 h-4" />
-              Hydrograph
-            </button>
-            <button 
-               onClick={() => setCurrentView('CanalModel')}
-               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all
-                ${currentView === 'CanalModel' ? 'bg-slate-100 text-slate-900' : 'text-slate-600 hover:bg-slate-50'}`}
-            >
-              <Map className="w-4 h-4" />
-              Canal Model
-            </button>
-            <button 
-               onClick={() => setCurrentView('Theory')}
-               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all
-                ${currentView === 'Theory' ? 'bg-slate-100 text-slate-900' : 'text-slate-600 hover:bg-slate-50'}`}
-            >
-              <BookOpen className="w-4 h-4" />
-              Theory
-            </button>
-            <button 
-               onClick={() => setCurrentView('Settings')}
-               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all
-                ${currentView === 'Settings' ? 'bg-slate-100 text-slate-900' : 'text-slate-600 hover:bg-slate-50'}`}
-            >
-              <SettingsIcon className="w-4 h-4" />
-              Settings
-            </button>
-            <button 
-               onClick={() => setCurrentView('About')}
-               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all
-                ${currentView === 'About' ? 'bg-slate-100 text-slate-900' : 'text-slate-600 hover:bg-slate-50'}`}
-            >
-              <Info className="w-4 h-4" />
-              About
-            </button>
-          </div>
-
+          ))}
+          
           {currentView === 'Calculator' && (
-            <div className="pt-4 border-t border-slate-100">
-              <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3 px-2">
-                Channel Shapes
-              </div>
-              <div className="space-y-1">
-                {(Object.keys(ChannelType) as Array<keyof typeof ChannelType>).map((key) => {
-                  const Icon = ChannelIcons[ChannelType[key]];
-                  const isActive = activeTab === ChannelType[key];
-                  return (
-                    <button
-                      key={key}
-                      onClick={() => handleTabChange(ChannelType[key])}
-                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200
-                        ${isActive 
-                          ? 'bg-brand-50 text-brand-700 shadow-sm ring-1 ring-brand-200' 
-                          : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
-                        }`}
-                    >
-                      <Icon className={`w-4 h-4 ${isActive ? 'text-brand-500' : 'text-slate-400'}`} />
-                      {ChannelType[key]}
-                    </button>
-                  );
-                })}
-              </div>
+            <div className="pt-4 mt-4 border-t border-slate-100">
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-2 mb-2">Geometry</p>
+              {Object.keys(ChannelType).map((k) => {
+                const Icon = ChannelIcons[ChannelType[k as keyof typeof ChannelType]];
+                const active = activeTab === ChannelType[k as keyof typeof ChannelType];
+                return (
+                  <button key={k} onClick={() => handleTabChange(ChannelType[k as keyof typeof ChannelType])} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium mb-1 transition-all ${active ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-50'}`}>
+                    <Icon className="w-4 h-4" /> {k}
+                  </button>
+                );
+              })}
             </div>
           )}
         </nav>
         <div className="p-4 border-t border-slate-100 bg-slate-50">
-           <button 
-            onClick={toggleUnit}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-white border border-slate-200 hover:bg-slate-50 rounded-md text-xs font-semibold text-slate-600 transition-colors"
-          >
-            <ArrowRightLeft className="w-3 h-3" />
-            Switch to {unit === 'SI' ? 'Imperial' : 'Metric'}
+           <button onClick={toggleUnit} className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-white border border-slate-200 hover:bg-slate-50 rounded-md text-xs font-bold text-slate-600 transition-colors shadow-sm">
+            <ArrowRightLeft className="w-3 h-3" /> Unit: {unit}
           </button>
         </div>
       </aside>
-      <main className="flex-1 overflow-y-auto h-screen p-4 md:p-8 scroll-smooth">
+
+      <main className="flex-1 overflow-y-auto h-screen p-4 md:p-8">
         <div className="max-w-7xl mx-auto">
-          <div className="md:hidden mb-6 flex justify-between items-center text-brand-600">
-             <div className="flex items-center gap-2">
-                <Waves className="w-6 h-6" />
-                <span className="text-xl font-bold">OCF Guru</span>
-             </div>
-             <button onClick={() => setCurrentView('Settings')} className="p-2 bg-white rounded-md shadow-sm">
-               <SettingsIcon className="w-5 h-5 text-slate-600" />
-             </button>
-          </div>
-          {currentView === 'Calculator' && <CalculatorView />}
-          {currentView === 'Hydrograph' && <HydrographView />}
-          {currentView === 'CanalModel' && <CanalModelView />}
+          {currentView === 'Calculator' && (
+            <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
+              <div className="xl:col-span-4 space-y-6">
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-5">
+                  <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 uppercase tracking-wider border-b pb-3">
+                    <SettingsIcon className="w-4 h-4 text-brand-500" /> System Parameters
+                  </h2>
+                  <div className="space-y-4">
+                    <label className="block">
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="text-xs font-bold text-slate-600">Flow Rate Q ({U.Q})</span>
+                        <TheoryPrompt title="Flow Rate (Q)" desc="Total volume of water passing through a section per unit of time." />
+                      </div>
+                      <input type="number" step="0.1" value={params.flowRate} onChange={e => setParams({...params, flowRate: parseFloat(e.target.value)||0})} className="w-full p-2 border rounded-md text-sm" />
+                    </label>
+                    <div className="grid grid-cols-2 gap-4">
+                      <label className="block">
+                        <span className="text-xs font-bold text-slate-600 mb-1 block">Slope S₀</span>
+                        <input type="number" step="0.0001" value={params.slope} onChange={e => setParams({...params, slope: parseFloat(e.target.value)||0})} className="w-full p-2 border rounded-md text-sm" />
+                      </label>
+                      <label className="block">
+                        <span className="text-xs font-bold text-slate-600 mb-1 block">Manning's n</span>
+                        <input type="number" step="0.001" value={params.manningN} onChange={e => setParams({...params, manningN: parseFloat(e.target.value)||0.013})} className="w-full p-2 border rounded-md text-sm" />
+                      </label>
+                    </div>
+                  </div>
+                  <div className="pt-4 border-t space-y-4">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Section Variables</p>
+                    {activeTab !== ChannelType.Triangular && activeTab !== ChannelType.Circular && (
+                      <label className="block">
+                        <span className="text-xs font-bold text-slate-600 mb-1 block">Width b ({U.L})</span>
+                        <input type="number" value={params.width} onChange={e => setParams({...params, width: parseFloat(e.target.value)||0})} className="w-full p-2 border rounded-md text-sm" />
+                      </label>
+                    )}
+                    {activeTab === ChannelType.Circular && (
+                      <label className="block">
+                        <span className="text-xs font-bold text-slate-600 mb-1 block">Diameter D ({U.L})</span>
+                        <input type="number" value={params.diameter} onChange={e => setParams({...params, diameter: parseFloat(e.target.value)||0})} className="w-full p-2 border rounded-md text-sm" />
+                      </label>
+                    )}
+                    {(activeTab === ChannelType.Trapezoidal || activeTab === ChannelType.Triangular) && (
+                      <label className="block">
+                        <span className="text-xs font-bold text-slate-600 mb-1 block">Side Slope z (H:V)</span>
+                        <input type="number" value={params.sideSlope} onChange={e => setParams({...params, sideSlope: parseFloat(e.target.value)||0})} className="w-full p-2 border rounded-md text-sm" />
+                      </label>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="xl:col-span-8 space-y-6">
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden h-[450px] flex flex-col relative">
+                  <div className="p-4 border-b flex justify-between items-center bg-slate-50/50">
+                    <h3 className="text-sm font-bold text-slate-700 flex items-center gap-2 uppercase">
+                      <TrendingUp className="w-4 h-4 text-brand-500" /> Visualization
+                    </h3>
+                    <div className="flex gap-2">
+                      {['Normal', 'Critical', 'Custom'].map(m => (
+                        <button key={m} onClick={() => setAnalysisMode(m as AnalysisMode)} className={`px-3 py-1 text-[10px] font-bold rounded-full border transition-all ${analysisMode === m ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'}`}>
+                          {m} Depth
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex-1 bg-slate-50/30">
+                    {sectionProps && <ChannelVisualizer type={activeTab} params={params} displayDepth={sectionProps.depth} criticalDepth={result?.criticalDepth} />}
+                  </div>
+                </div>
+
+                {result && !result.error && (
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 text-center">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Regime</p>
+                      <p className={`text-lg font-black ${result.flowRegime === 'Supercritical' ? 'text-rose-600' : 'text-emerald-600'}`}>{result.flowRegime}</p>
+                      <p className="text-xs font-medium text-slate-500">Fr = {result.froudeNumber.toFixed(3)}</p>
+                    </div>
+                    <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 text-center">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Normal yₙ</p>
+                      <p className="text-lg font-black text-slate-800">{result.normalDepth.toFixed(3)} {U.L}</p>
+                    </div>
+                    <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 text-center">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Critical y꜀</p>
+                      <p className="text-lg font-black text-slate-800">{result.criticalDepth.toFixed(3)} {U.L}</p>
+                    </div>
+                    <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 text-center">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Velocity V</p>
+                      <p className="text-lg font-black text-slate-800">{result.velocity.toFixed(2)} {U.V}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {currentView === 'CanalModel' && (
+            <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
+              <div className="xl:col-span-4 space-y-4">
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col max-h-[85vh]">
+                  <div className="p-4 border-b bg-slate-50/50 flex justify-between items-center">
+                    <h2 className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                      <Map className="w-4 h-4 text-brand-500" /> Multi-Reach Input
+                    </h2>
+                    <button onClick={addCanalSection} disabled={canalSections.length >= 5} className="p-1.5 bg-brand-600 text-white rounded-md hover:bg-brand-700 disabled:opacity-50 shadow-sm">
+                      <Plus className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <div className="p-4 overflow-y-auto space-y-4">
+                    {canalSections.map((s, idx) => (
+                      <div key={s.id} className="p-3 border rounded-lg bg-slate-50/50 relative group">
+                        <div className="flex justify-between items-center mb-2">
+                          <span className="text-[10px] font-black text-slate-400 uppercase">Section {idx+1}</span>
+                          {idx > 0 && <button onClick={() => setCanalSections(ss => ss.filter(x => x.id !== s.id))} className="text-slate-300 hover:text-rose-500 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>}
+                        </div>
+                        <div className="flex gap-1 mb-2">
+                          <button onClick={() => updateSection(s.id, 'inputMode', 'Slope')} className={`flex-1 text-[9px] font-bold py-1 border rounded ${s.inputMode === 'Slope' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-400 border-slate-200'}`}>SLOPE</button>
+                          <button onClick={() => updateSection(s.id, 'inputMode', 'Elevation')} className={`flex-1 text-[9px] font-bold py-1 border rounded ${s.inputMode === 'Elevation' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-400 border-slate-200'}`}>ELEV</button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <label className="block">
+                            <span className="text-[9px] font-bold text-slate-500 uppercase">Length ({U.L})</span>
+                            <input type="number" value={s.length} onChange={e => updateSection(s.id, 'length', parseFloat(e.target.value)||0)} className="w-full p-1.5 border rounded text-xs" />
+                          </label>
+                          {s.inputMode === 'Slope' ? (
+                            <label className="block">
+                              <span className="text-[9px] font-bold text-slate-500 uppercase">Slope</span>
+                              <input type="number" step="0.0001" value={s.slope} onChange={e => updateSection(s.id, 'slope', parseFloat(e.target.value)||0)} className="w-full p-1.5 border rounded text-xs" />
+                            </label>
+                          ) : (
+                            <>
+                              <label className="block">
+                                <span className="text-[9px] font-bold text-slate-500 uppercase">US EL</span>
+                                <input type="number" value={s.usElevation} onChange={e => updateSection(s.id, 'usElevation', parseFloat(e.target.value)||0)} className="w-full p-1.5 border rounded text-xs" />
+                              </label>
+                              <label className="block col-start-2">
+                                <span className="text-[9px] font-bold text-slate-500 uppercase">DS EL</span>
+                                <input type="number" value={s.dsElevation} onChange={e => updateSection(s.id, 'dsElevation', parseFloat(e.target.value)||0)} className="w-full p-1.5 border rounded text-xs" />
+                              </label>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                    
+                    <div className="pt-4 border-t space-y-3">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Boundary Conditions</span>
+                        <TheoryPrompt title="BC Strategy" desc="Subcritical flow is controlled downstream. Supercritical flow is controlled upstream." />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button onClick={() => setBoundaryCond({...boundaryCond, location: 'Upstream'})} className={`py-2 text-[10px] font-bold border rounded ${boundaryCond.location === 'Upstream' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-400 border-slate-200'}`}>UPSTREAM</button>
+                        <button onClick={() => setBoundaryCond({...boundaryCond, location: 'Downstream'})} className={`py-2 text-[10px] font-bold border rounded ${boundaryCond.location === 'Downstream' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-400 border-slate-200'}`}>DOWNSTREAM</button>
+                      </div>
+                      <select value={boundaryCond.type} onChange={e => setBoundaryCond({...boundaryCond, type: e.target.value as any})} className="w-full p-2 border rounded text-xs font-medium">
+                        <option value="NormalDepth">Normal Depth (yₙ)</option>
+                        <option value="CriticalDepth">Critical Depth (y꜀)</option>
+                        <option value="KnownDepth">Known Depth (y)</option>
+                      </select>
+                      {boundaryCond.type === 'KnownDepth' && <input type="number" step="0.01" value={boundaryCond.value} onChange={e => setBoundaryCond({...boundaryCond, value: parseFloat(e.target.value)||0})} className="w-full p-2 border rounded text-xs" placeholder="Enter Depth" />}
+                    </div>
+
+                    <button onClick={handleRunModel} className="w-full py-3 bg-slate-900 text-white rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-black transition-all shadow-md flex items-center justify-center gap-2">
+                      <ArrowRight className="w-4 h-4" /> Generate Profile
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="xl:col-span-8 space-y-4">
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-1 h-[550px] flex flex-col relative">
+                   <div className="p-3 flex justify-between items-center bg-white border-b">
+                     <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
+                       <Activity className="w-4 h-4 text-brand-500" /> Hydraulic Profile Analysis
+                     </h3>
+                     {result && <div className={`text-[10px] font-black px-2 py-0.5 rounded border ${result.flowRegime === 'Subcritical' ? 'text-emerald-600 bg-emerald-50 border-emerald-100' : 'text-rose-600 bg-rose-50 border-rose-100'}`}>{result.flowRegime.toUpperCase()}</div>}
+                   </div>
+                   <div className="flex-1 bg-slate-50/30 p-4">
+                     {profileData.length > 0 ? <ProfileChart data={profileData} unitLabel={U.L} /> : (
+                       <div className="w-full h-full flex flex-col items-center justify-center text-slate-300">
+                         <AlertCircle className="w-12 h-12 mb-3 opacity-20" />
+                         <p className="text-sm font-medium">Setup your canal reaches and click 'Generate'</p>
+                       </div>
+                     )}
+                   </div>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="bg-white p-4 border rounded-xl shadow-sm">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Total L</p>
+                    <p className="text-sm font-black text-slate-800">{canalSections.reduce((a,c) => a+c.length, 0).toFixed(0)} {U.L}</p>
+                  </div>
+                  <div className="bg-white p-4 border rounded-xl shadow-sm">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Avg Slope</p>
+                    <p className="text-sm font-black text-slate-800">{(canalSections.reduce((a,c) => a+c.slope, 0) / canalSections.length).toFixed(4)}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {currentView === 'Theory' && <TheoryView />}
           {currentView === 'Settings' && <SettingsView />}
           {currentView === 'About' && <AboutView />}
+          {currentView === 'Hydrograph' && <HydrographView />}
         </div>
       </main>
     </div>
   );
 };
 
+// ... keep existing sub-component implementations (HydrographView, TheoryView, etc) ...
+// Ensure they use the updated U and params state as before.
 export default App;
